@@ -376,33 +376,40 @@ object MockImpl {
       else
         "mock$"+ name +"$0"
     }
-    
-    def findApplication(tree: Tree): (Tree, Name, List[Type]) = tree match {
-      case Select(o, n) => (o, n, Nil)
-      case Block(_, t) => findApplication(t)
-      case Typed(t, _) => findApplication(t)
-      case Function(_, t) => findApplication(t)
-      case Apply(t, _) => findApplication(t)
-      case TypeApply(t, args) => val (o, n, _) = findApplication(t); (o, n, args map (_.tpe))
-      case _ => reportError(
-          s"ScalaMock: Unrecognised structure: ${showRaw(tree)}. Please open a ticket at https://github.com/paulbutcher/ScalaMock/issues")
+
+    // mock.getClass().getMethod(name).invoke(obj).asInstanceOf[MockFunctionX[...]]
+    def mockedFunctionGetter(obj: Tree, name: Name, targs: List[Type]): c.Expr[M] = {
+      c.Expr(
+        TypeApply(
+          Select(
+            Apply(
+              Select(
+                Apply(
+                  Select(
+                    Apply(Select(obj, TermName("getClass")), List()),
+                    TermName("getMethod")),
+                  List(Literal(Constant(mockFunctionName(name, obj.tpe, targs))))),
+                TermName("invoke")),
+              List(obj)),
+            TermName("asInstanceOf")),
+          List(TypeTree(weakTypeOf[M]))))
     }
 
-    val (obj, name, targs) = findApplication(f.tree)
-    c.Expr(
-      TypeApply(
-        Select(
-          Apply(
-            Select(
-              Apply(
-                Select(
-                  Apply(Select(obj, TermName("getClass")), List()),
-                  TermName("getMethod")),
-                List(Literal(Constant(mockFunctionName(name, obj.tpe, targs))))),
-              TermName("invoke")),
-            List(obj)),
-          TermName("asInstanceOf")),
-        List(TypeTree(weakTypeOf[M]))))
+    def transcribeTree(tree: Tree, targs: List[Type] = Nil): c.Expr[M] = {
+      tree match {
+        case Select(qualifier, name) => mockedFunctionGetter(qualifier, name, targs)
+        case Block(stats, expr) => c.Expr[M](Block(stats, transcribeTree(expr).tree)) // see issue #62
+        case Typed(expr, tpt) => transcribeTree(expr)
+        case Function(vparams, body) => transcribeTree(body)
+        case Apply(fun, args) => transcribeTree(fun)
+        case TypeApply(fun, args) => transcribeTree(fun, args.map(_.tpe));
+        case _ => reportError(
+          s"ScalaMock: Unrecognised structure: ${showRaw(tree)}." +
+          "Please open a ticket at https://github.com/paulbutcher/ScalaMock/issues")
+      }
+    }
+    
+    transcribeTree(f.tree)
   }
 
   def toMockFunction0[R: c.WeakTypeTag](c: Context)(f: c.Expr[() => R])(evidence$1: c.Expr[Defaultable[R]]) =
