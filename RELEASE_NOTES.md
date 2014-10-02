@@ -3,6 +3,7 @@
 ## New in ScalaMock 3.2
 
 - improved reporting of unsatisfied expectations (fix for #72)
+- updated, extended and reorganized documentation (created User guide)
 - improved support for sharing mocks and expectations by different test cases
 - expectations can be set in Suite scope (fix for #25 and #35)
 - fixed two bugs in scalamock-specs2-support:
